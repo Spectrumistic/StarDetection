@@ -14,9 +14,12 @@ In order for the data to be fed into flink I use a bash script that reads a mont
 1. On a new terminal run `bin/zookeeper-server-start.sh config/zookeeper.properties`
 1. On another terminal run `bin/kafka-server-start.sh config/server.properties`
 1. Create a topic named quickstart-events by running `bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server localhost:9092` on another terminal
-1. Run the maven project
+1. Run the maven project `StreamEnv_lessStrictStarDetectionTest.java`
 1. On a terminal run the script (that is to be added in the repo)
 
+## Additional Work done
+The project also contains an algorithm that works on static graphs, utilizing the dataset library and simple execution environment, and detects strict star topologies. It is located in
+`starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions.
 
 ## Troubleshooting 
 * If you are having issues related to kafka logs you can delete them without breaking anything by running `rm -rf /tmp/kafka-logs`
