@@ -97,18 +97,25 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
               for (Tuple2<Long, Integer> longIntegerTuple2 : iterable) {
                     collector.collect(longIntegerTuple2);
+                    // here we could process additional data per window here
+                  Integer size = 0;
+                  if( Star.Relations.get(longIntegerTuple2.f0) != null) {
+                      size = Star.Relations.get(longIntegerTuple2.f0).size();
+                  }
+
+                  System.out.println("This is " + longIntegerTuple2.f0 + " and the size is " + size);
               }
             }
-        }).setParallelism(1).keyBy(v -> v.f0).sum(1);
-//                .filter(new FilterFunction<Tuple2<Long, Integer>>() {
-//            @Override
-//            public boolean filter(Tuple2<Long, Integer> longIntegerTuple2) throws Exception {
-//                if(longIntegerTuple2.f1 < 1000){
-//                    return false;
-//                }
-//                return true;
-//            }
-//        });
+        }).keyBy(v -> v.f0).sum(1)
+                .filter(new FilterFunction<Tuple2<Long, Integer>>() {
+            @Override
+            public boolean filter(Tuple2<Long, Integer> longIntegerTuple2) throws Exception {
+                if(longIntegerTuple2.f1 < 1000){
+                    return false;
+                }
+                return true;
+            }
+        });
 
         DataStreamSink sink =  finalResult.print();
 
@@ -190,14 +197,9 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
         public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<>();
 
-//        private static List<Vertex<Long, String>> vertexList = new ArrayList<>();
-//        vertexList.add(new Vertex<Long, String>(-1L, "aseme1"));
-//        vertexList.add(new Vertex<Long, String>(-2L, "aseme2"));
-//
-//        private static List<Edge<Long, String>> edgeList = new ArrayList<>();
-//        edgeList.add(new Edge<Long, String>(-1L, -2L, "relation"));
-
-//        public static Graph<Long, String, String> graph;
+//        public Star(HashMap<Long, ArrayList<Long>> rel) {
+//            this.Relations = rel;
+//        }
 
         @Override
         public void flatMap(String value, Collector<Tuple2<Long, Integer>> out) throws FlatMapFunctionException {
@@ -221,20 +223,18 @@ public class StreamEnv_lessStrictStarDetectionTest {
                 return;
             }
 
-//            if (from.f0 != null && to.f0 != null) {
-////                    graph.addEdge(from, to, "1");
-//                // no "collisions" yet
-//                if (Relations.get(from.f0) == null) {
-//                    ArrayList<Long> newArray = new ArrayList<>();
-//                    newArray.add(to.f0);
-//                    Relations.put(from.f0, newArray);
-//                } else {
-//                    // starting to have collisions
-//                    ArrayList<Long> existingArray = Relations.get(from.f0);
-//                    existingArray.add(to.f0);
-//                }
-//            }
-//                graph.getDegrees().maxBy(1).print();
+            if (from.f0 != null && to.f0 != null) {
+                // no "collisions" yet
+                if (Relations.get(from.f0) == null) {
+                    ArrayList<Long> newArray = new ArrayList<>();
+                    newArray.add(to.f0);
+                    Relations.put(from.f0, newArray);
+                } else {
+                    // starting to have collisions
+                    ArrayList<Long> existingArray = Relations.get(from.f0);
+                    existingArray.add(to.f0);
+                }
+            }
 //                System.out.println("Kafka and Flink says: " + value + " " + (Relations.get(from.f0) != null ? Relations.get(from.f0).size() : "-"));
 
             out.collect(new Tuple2<Long, Integer>(from.f0, 1));
