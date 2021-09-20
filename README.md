@@ -1,5 +1,6 @@
-# Thesis project: Star Detection on live twitter data 
-
+# Thesis project: Star Detection on live twitter data
+**Author:** Stefanos Pleros,
+**Supervisor:** Polyvios Pratikakis
 ---
 
 ## Description
