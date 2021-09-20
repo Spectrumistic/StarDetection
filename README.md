@@ -1,7 +1,4 @@
 # Thesis project: Star Detection on live twitter data
-**Author:** Stefanos Pleros,
-**Supervisor:** Polyvios Pratikakis
----
 
 ## Description
 This is a flink based project that utilizes kafka to simulate a real incoming stream of twitter data into flink.
@@ -24,3 +21,7 @@ In order for the data to be fed into flink I use a bash script that reads a mont
 ## Troubleshooting 
 * If you are having issues related to kafka logs you can delete them without breaking anything by running `rm -rf /tmp/kafka-logs`
 * If you are having issues related to the server in which kafka is listening then try changing the `listeners` in the `server.properties` config file to `localhost`
+
+## License
+Distributed under the MIT License. See [LICENSE](https://opensource.org/licenses/MIT) for more information
+
