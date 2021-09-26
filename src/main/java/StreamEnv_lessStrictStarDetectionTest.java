@@ -14,8 +14,9 @@ import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
 import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.util.serialization.SimpleStringSchema;
-import java.util.ArrayList;
-import java.util.HashMap;
+
+import java.util.*;
+
 import org.apache.flink.streaming.api.windowing.triggers.Trigger;
 import org.apache.flink.streaming.api.windowing.triggers.TriggerResult;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
@@ -96,14 +97,9 @@ public class StreamEnv_lessStrictStarDetectionTest {
             public void process(Context context, Iterable<Tuple2<Long, Integer>> iterable, Collector<Tuple2<Long, Integer>> collector) throws Exception {
 
               for (Tuple2<Long, Integer> longIntegerTuple2 : iterable) {
+                  // instead we can collect other results here
                     collector.collect(longIntegerTuple2);
-                    // here we could process additional data per window here
-                  Integer size = 0;
-                  if( Star.Relations.get(longIntegerTuple2.f0) != null) {
-                      size = Star.Relations.get(longIntegerTuple2.f0).size();
-                  }
-
-                  System.out.println("This is " + longIntegerTuple2.f0 + " and the size is " + size);
+                    // here we could process additional data
               }
             }
         }).keyBy(v -> v.f0).sum(1)
@@ -115,9 +111,9 @@ public class StreamEnv_lessStrictStarDetectionTest {
                 }
                 return true;
             }
-        });
+        }).flatMap(new ExistingStar());
 
-        DataStreamSink sink =  finalResult.print();
+//        DataStreamSink sink =  finalResult.print();
 
 //        DataStream<Tuple2<Long, Integer>> globalResult = result.keyBy(v -> v.f0).window(GlobalWindows.create()).sum(1);
 //
@@ -192,10 +188,10 @@ public class StreamEnv_lessStrictStarDetectionTest {
     }
 
 
-    // should this calculate total degree or just outdegree? (right now its only out degree)
+    // should this calculate total degree or just outdegree? (right now its only out degree and if it is enough for now)
     public static class Star implements FlatMapFunction<String, Tuple2<Long, Integer>> {
 
-        public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<>();
+        public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<Long, ArrayList<Long>>();
 
 //        public Star(HashMap<Long, ArrayList<Long>> rel) {
 //            this.Relations = rel;
@@ -215,28 +211,36 @@ public class StreamEnv_lessStrictStarDetectionTest {
             // Should handle 3rd part eventually
             Vertex<Long, String> from = new Vertex<>(Long.parseLong(parts[0].trim()), "UserFrom");
             Vertex<Long, String> to = new Vertex<>(Long.parseLong(parts[1].trim()), "UserTo");
+
             // Retweeted should eventually be replaced with the 3rd part value;
 //            graph.addEdge(from, to, "Retweeted");
-            if(from.f0 == to.f0){
-                System.out.println("Detected self edge ignoring... ");
-                // we should not add self edges
-                return;
-            }
 
-            if (from.f0 != null && to.f0 != null) {
-                // no "collisions" yet
-                if (Relations.get(from.f0) == null) {
-                    ArrayList<Long> newArray = new ArrayList<>();
-                    newArray.add(to.f0);
-                    Relations.put(from.f0, newArray);
-                } else {
-                    // starting to have collisions
-                    ArrayList<Long> existingArray = Relations.get(from.f0);
-                    existingArray.add(to.f0);
+            synchronized (Relations) {
+
+
+                if (from.f0 == to.f0) {
+                    System.out.println("Detected self edge ignoring... ");
+                    // we should not add self edges
+                    return;
                 }
-            }
+
+                if (from.f0 != null && to.f0 != null) {
+                    // no "collisions" yet
+                    if (Relations.get(from.f0) == null) {
+                        ArrayList<Long> newArray = new ArrayList<Long>();
+                        newArray.add(to.f0);
+                        Relations.put(from.f0, newArray);
+                    } else {
+                        // starting to have "collisions"
+                        ArrayList<Long> existingArray = Relations.get(from.f0);
+//                    System.out.println("In flatmap " + existingArray.size());
+                        // sometimes this throws array index out of bounds exception ??? and some times null pointer????
+                        existingArray.add(to.f0);
+                    }
+                }
 //                System.out.println("Kafka and Flink says: " + value + " " + (Relations.get(from.f0) != null ? Relations.get(from.f0).size() : "-"));
 
+            }
             out.collect(new Tuple2<Long, Integer>(from.f0, 1));
         }
 
@@ -244,29 +248,81 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
     public static class ExistingStar implements FlatMapFunction<Tuple2<Long, Integer>, Tuple2<Long, Integer>> {
 
-        public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<>();
+
+        private Long countDuplicates(ArrayList<Long> clique) {
+
+            Set<Long> uniqueUsers = new HashSet<Long>(clique);
+            Long duplicates = 0L;
+
+            for (Long user : uniqueUsers) {
+
+//                System.out.println("User " + user + " duplicates " +  Collections.frequency(clique, user));
+                int freq = Collections.frequency(clique, user);
+
+                if(freq > 2L){
+                    duplicates += freq;
+                }
+
+            }
+
+            return duplicates;
+        }
+
+        // on 12829 prints all apart from 882 were 'persistent' with freq > 2 and pers > 50%
+        // on 12829 prints all apart from 2036 were 'persistent' with freq > 2 and pers > 60%
+        // on 12829 prints all apart from 11354 were 'persistent' with freq > 2 and pres > 90%
+        private Boolean isPersistent(Long count, Integer total) {
+
+            if((count * 100/total) > 90) {
+                return true;
+            }
+
+            return  false;
+        }
 
         @Override
         public void flatMap(Tuple2<Long, Integer> value, Collector<Tuple2<Long, Integer>> out) throws FlatMapFunctionException {
+            Integer size = 0;
 
+            if( Star.Relations.get(value.f0) != null) {
+                ArrayList<Long> tmp = Star.Relations.get(value.f0);
+                size = tmp.size();
 
-//            if (from.f0 != null && to.f0 != null) {
-////                    graph.addEdge(from, to, "1");
-//                // no "collisions" yet
-//                if (Relations.get(from.f0) == null) {
-//                    ArrayList<Long> newArray = new ArrayList<>();
-//                    newArray.add(to.f0);
-//                    Relations.put(from.f0, newArray);
-//                } else {
-//                    // starting to have collisions
-//                    ArrayList<Long> existingArray = Relations.get(from.f0);
-//                    existingArray.add(to.f0);
-//                }
-//            }
-//                graph.getDegrees().maxBy(1).print();
-//                System.out.println("Kafka and Flink says: " + value + " " + (Relations.get(from.f0) != null ? Relations.get(from.f0).size() : "-"));
+//                System.out.println("This is " + value.f0 + " and the size is " + size + " should match with out degree " + value.f1);
+//                System.out.println(tmp.toString());
 
-            out.collect(new Tuple2<Long, Integer>(value.f0, value.f1));
+                // in theory, every entry time we check the Relations data structure here, we get a list of the filtered
+                // users a user has retweeted from/to up to this time.
+                // Meaning that each time we have information for the current window AND for each consecutive one
+                // information about all the past windows is kept including the present one
+
+                // How should we define a clique that forms as one that's persistent?
+                // * Could count how many times per month a user appears in the star topology of another user and if enough
+                //   users satisfy a certain threshold, for example more than 50% of the stars topology consists of the
+                //   same users (duplicates or another threshold) it can be marked as suspicious or as an interesting
+                //   clique to study.
+                //   (for a period of 20 days or more) -> This is interesting but requires extra parameters to be added
+                //
+                //   This seems promising but has abstract threshold variable/s which isn't necessarily bad, it can be something
+                //   configurable, more of a statistic observation rather than proof of something.
+
+                // How to implement the above:
+                // Relations can provide us with both the final out degree of each user star and the user id of their
+                // neighbors. The above formula would be something like (#ofDuplicates * 100/#totalUsersInTheStar) > 50%
+                //
+                // * Need a function to count how many times each user appears in a given star
+
+                ArrayList<Long> clique = Star.Relations.get(value.f0);
+                Long duplicates = countDuplicates(clique);
+
+                Boolean isPersistent = isPersistent(duplicates, clique.size());
+
+                System.out.println("User " + value.f0 + " duplicates " + duplicates + " persistent " + isPersistent + " size " +  clique.size());
+                if(isPersistent){
+                    out.collect(new Tuple2<Long, Integer>(value.f0, value.f1));
+                }
+            }
+
         }
 
     }
