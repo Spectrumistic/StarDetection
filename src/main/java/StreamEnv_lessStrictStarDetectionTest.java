@@ -13,6 +13,7 @@ import org.apache.flink.streaming.api.functions.windowing.ProcessAllWindowFuncti
 import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
 import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.util.serialization.DeserializationSchema;
 import org.apache.flink.streaming.util.serialization.SimpleStringSchema;
 
 import java.util.*;
@@ -270,7 +271,7 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
         // on 12829 prints all apart from 882 were 'persistent' with freq > 2 and pers > 50%
         // on 12829 prints all apart from 2036 were 'persistent' with freq > 2 and pers > 60%
-        // on 12829 prints all apart from 11354 were 'persistent' with freq > 2 and pres > 90%
+        // on 12829 prints all apart from 11354 were 'persistent' with freq > 2 and pers > 90%
         private Boolean isPersistent(Long count, Integer total) {
 
             if((count * 100/total) > 90) {
