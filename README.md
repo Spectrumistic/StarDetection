@@ -7,19 +7,19 @@ is the users that contribute the most to the biggest star topologies present in 
 
 ## How to run
 In order for the data to be fed into flink I use a bash script that reads a months worth of data and writes it to the kafka stream.
-@todo: script to be added
-@todo: add parsing script
+Path variables need to be changed to run locally on another machine. I have marked them with @pathChange.
 
 1. Install kafka locally from https://kafka.apache.org/downloads. In the makings of this project kafka 2.8.0 was used.
 1. On a new terminal run `bin/zookeeper-server-start.sh config/zookeeper.properties`
 1. On another terminal run `bin/kafka-server-start.sh config/server.properties`
 1. Create a topic named quickstart-events by running `bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server localhost:9092` on another terminal
+1. Step 4 has to be performed only once.
 1. Run the maven project `StreamEnv_lessStrictStarDetectionTest.java`
-1. On a terminal run the script (that is to be added in the repo)
+1. On a terminal run the script `resources/startStream.sh`
 
 ## Additional Work done
 The project also contains an algorithm that works on static graphs, utilizing the dataset library and simple execution environment, and detects strict star topologies. It is located in
-`starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions.
+`starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions. 
 
 ## Troubleshooting 
 * If you are having issues related to kafka logs you can delete them without breaking anything by running `rm -rf /tmp/kafka-logs`

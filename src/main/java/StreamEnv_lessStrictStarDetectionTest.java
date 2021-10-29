@@ -1,26 +1,32 @@
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.graph.*;
-import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
+import org.apache.flink.streaming.api.functions.windowing.AllWindowFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessAllWindowFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
 import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows;
+import org.apache.flink.streaming.api.windowing.assigners.SlidingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
-import org.apache.flink.streaming.util.serialization.DeserializationSchema;
+import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.streaming.util.serialization.SimpleStringSchema;
 
 import java.util.*;
+import java.io.*;
+import com.opencsv.CSVWriter;
+import java.lang.Long;
 
 import org.apache.flink.streaming.api.windowing.triggers.Trigger;
 import org.apache.flink.streaming.api.windowing.triggers.TriggerResult;
-import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.streaming.api.windowing.windows.Window;
 import org.apache.flink.util.Collector;
 
@@ -54,65 +60,92 @@ public class StreamEnv_lessStrictStarDetectionTest {
         //  if earliest() then we start reading events from the start of the kafka session
 //
         DataStream<String> graphData = env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source");
-//        DataStream<String> graphData  = env.readTextFile("file:///F:\\Users\\ismer\\Documents\\CSD\\ptuxiaki\\twitter live stream\\src\\main\\resources\\just1000coma.csv");
-        // To feed input an file into the stream use ``cat input.txt | nc -l -p 9999``
-//        DataStream<String> graphData = env.socketTextStream("localhost", 9999);
-
-        // Creating the graph with just the edges files
-
-
-//        The following need to be true to have a star topology
-//        1.One node (the central node) has degree V – 1.
-//        2.All nodes except the central node have degree 1.
-//        3.# of edges = # of Vertices – 1.
-
 
 //        DataStream<String> graphWithWatermarks = graphData.assignTimestampsAndWatermarks(WatermarkStrategy.forMonotonousTimestamps());
 
-        // This calculates only out degree centrality without accounting for edge weights and only for 1 file
-//        DataStream<Tuple2<Long, Integer>> result = graphData.rebalance().flatMap(new Star()).keyBy(value -> value.f0).window(TumblingProcessingTimeWindows.of(Time.seconds(5))).sum(1);
+        DataStream<AdjacencyList> result = graphData.rebalance().flatMap(new Star()).keyBy(adjacencyList -> adjacencyList.getUser())
+                .window(ProcessingTimeSessionWindows.withGap(Time.seconds(5))).reduce(new ReduceFunction<AdjacencyList>() {
 
-        // This aims to do the above but on multiple files with each file being marked as a seperate window
-//        DataStream<Tuple2<Long, Integer>> result = graphData.rebalance().flatMap(new Star()).keyBy(value -> value.f0).window(GlobalWindows.create()).trigger(new FileTrigger()).sum(1);
+                    // convert the edge stream into a
+                    @Override
+                    public AdjacencyList reduce(AdjacencyList t1, AdjacencyList t2) throws Exception {
 
-        // This aims to do the above but the end of a window is marked by a pause in receiving data for a specific amount of time
-        DataStream<Tuple2<Long, Integer>> result = graphData.rebalance().flatMap(new Star()).keyBy(value -> value.f0)
-                .window(ProcessingTimeSessionWindows.withGap(Time.seconds(5))).sum(1);
+                        ArrayList<ArrayList<Long>> dayEdges = new ArrayList<>();
+                        ArrayList<Long> edges = new ArrayList<>();
+
+                        if(t1.getEdges().size() >= 1 && t2.getEdges().size() >= 1) {
+                            edges = t1.getEdges().get(0);
+                            edges.addAll(t2.getEdges().get(0));
+
+                            // probably should be removed, never gonna end in here
+                        }else if(t1.getEdges().size() == 0) {
+                            edges.addAll(t2.getEdges().get(0));
+                        }else if(t2.getEdges().size() == 0){
+                            edges.addAll(t1.getEdges().get(0));
+                        }
+
+                        dayEdges.add(edges);
+
+                        AdjacencyList reducedT1 = new AdjacencyList(t1.getUser(), t1.getWeight() + t2.getWeight(), dayEdges);
+
+                        return reducedT1;
+                    }
+                });
+//                .sum(1);
+
+        // process is slow to begin with as well
+        DataStream<ArrayList<Tuple2<Long, Tuple2<Long, Long>>>> finalRes = result.windowAll(ProcessingTimeSessionWindows.withGap(Time.seconds(25))).apply(new AllWindowFunction<AdjacencyList, AdjacencyList, TimeWindow>() {
+            @Override
+            public void apply(TimeWindow timeWindow, Iterable<AdjacencyList> iterable, Collector<AdjacencyList> collector) throws Exception {
+                for(AdjacencyList it: iterable) {
+                    collector.collect(it);
+                }
+            }
+        }).keyBy(v -> v.getUser()).
+        reduce(new ReduceFunction<AdjacencyList>() {
+
+                    // convert the edge stream into a
+                    @Override
+                    public AdjacencyList reduce(AdjacencyList t1, AdjacencyList t2) throws Exception {
+
+                        ArrayList<ArrayList<Long>> dayEdges = new ArrayList<>();
+//                        ArrayList<Long> edges = new ArrayList<>();
+
+                        if(t1.getEdges().size() >= 1 && t2.getEdges().size() >= 1) {
+                            dayEdges = t1.getEdges();
+                            dayEdges.addAll(t2.getEdges());
+                        }else {
+                            // idk
+                        }
+
+//                        dayEdges.add(edges);
+
+                        AdjacencyList reducedT1 = new AdjacencyList(t1.getUser(), t1.getWeight() + t2.getWeight(), dayEdges);
+
+                        return reducedT1;
+                    }
+                }).filter(new FilterFunction<AdjacencyList>() {
+                    @Override
+                    public boolean filter(AdjacencyList adjacencyList) throws Exception {
+                        if(adjacencyList.getOutDegree() > 1000L) {
+                            return true;
+                        }else {
+                            return false;
+                        }
+                    }
+                }).flatMap(new FlatMapFunction<AdjacencyList, ArrayList<Tuple2<Long, Tuple2<Long, Long>>>>() {
+
+            @Override
+            public void flatMap(AdjacencyList adjacencyList, Collector<ArrayList<Tuple2<Long, Tuple2<Long, Long>>>> collector) throws Exception {
+                collector.collect(adjacencyList.softIntersect(adjacencyList.getEdges().toArray(new ArrayList[0])));
+
+            }
+        }).setParallelism(5);
+
+        // perform the session window logic here but with sliding windows
+//        result.keyBy(v -> v.getUser()).window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(5)));
 
 //        result.print();
-
-//        DataStream<Tuple2<Long, Integer>> finalResult = graphData.windowAll(ProcessingTimeSessionWindows.withGap(Time.seconds(5))).process(new ProcessAllWindowFunction<String, Tuple2<Long, Integer>, TimeWindow>() {
-//            @Override
-//            public void process(Context context, Iterable<String> iterable, Collector<Tuple2<Long, Integer>> collector) throws Exception {
-//                System.out.println("processed file");
-//
-//                for (String s : iterable) {
-//                    System.out.println("******* " + s );
-//                }
-//            }
-//        });
-
-        // window works by separating the keyed streams to parallel tasks, maybe that's why it wasn't working as expected b4.
-        DataStream<Tuple2<Long, Integer>> finalResult = result.windowAll(ProcessingTimeSessionWindows.withGap(Time.seconds(25))).process(new ProcessAllWindowFunction<Tuple2<Long, Integer>, Tuple2<Long, Integer>, TimeWindow>() {
-            @Override
-            public void process(Context context, Iterable<Tuple2<Long, Integer>> iterable, Collector<Tuple2<Long, Integer>> collector) throws Exception {
-
-              for (Tuple2<Long, Integer> longIntegerTuple2 : iterable) {
-                  // instead we can collect other results here
-                    collector.collect(longIntegerTuple2);
-                    // here we could process additional data
-              }
-            }
-        }).keyBy(v -> v.f0).sum(1)
-                .filter(new FilterFunction<Tuple2<Long, Integer>>() {
-            @Override
-            public boolean filter(Tuple2<Long, Integer> longIntegerTuple2) throws Exception {
-                if(longIntegerTuple2.f1 < 1000){
-                    return false;
-                }
-                return true;
-            }
-        }).flatMap(new ExistingStar());
 
 //        DataStreamSink sink =  finalResult.print();
 
@@ -120,7 +153,46 @@ public class StreamEnv_lessStrictStarDetectionTest {
 //
 //        globalResult.print();
 
-        String outputPath = "F:\\Users\\ismer\\Documents\\CSD\\ptuxiaki\\dataset\\twitterdata\\results";
+
+        // @pathCahnge to the path you want the results of persistent stars to be saved.
+        String outputPath = "F:\\Users\\ismer\\Documents\\CSD\\ptuxiaki\\dataset\\twitterdata\\results-t20-total\\";
+        outputPath.replace("\\", "/");
+        finalRes.flatMap(new FlatMapFunction<ArrayList<Tuple2<Long, Tuple2<Long, Long>>>, Tuple2<Long, Long>>() {
+
+            @Override
+            public void flatMap(ArrayList<Tuple2<Long, Tuple2<Long, Long>>> persStar, Collector<Tuple2<Long, Long>> collector) throws Exception {
+
+                try {
+                    String fileName;
+                    if(persStar.size() != 0) {
+                        fileName = outputPath + persStar.get(0).f0 + ".csv";
+//                    }
+//                    else{
+//                        Random ran = new Random();
+//                        fileName = outputPath + "na" + ran.nextLong() + ".csv";
+//                    }
+                        File file = new File(fileName);
+                        FileWriter outputfile = new FileWriter(file);
+                        CSVWriter writer = new CSVWriter(outputfile);
+                        String[] header = { "Central_User", "Retweet_To", "Number_Of_Days" };
+                        writer.writeNext(header);
+                        for (Tuple2<Long, Tuple2<Long, Long>> it : persStar) {
+                            // it.f0 users star, it.f1.f0 edge to user in adjacency list, it.f1.f1 # of days present
+                            String[] data = {it.f0.toString(), it.f1.f0.toString(), it.f1.f1.toString()};
+                            writer.writeNext(data);
+                        }
+                        System.out.println("Closed file with path " + outputPath + fileName + " - entries " + persStar.size());
+                        writer.close();
+                    }
+
+                }catch(Exception e){
+                    System.out.println("Could not process user ");
+                    e.printStackTrace();
+                }
+            }
+        }).setParallelism(5);
+
+
 
 //        final StreamingFileSink<Tuple2<Long, Integer>> actualSink = StreamingFileSink.forRowFormat(new Path(outputPath),
 //                new SimpleStringEncoder<Tuple2<Long, Integer>>("UTF-8")).withRollingPolicy( DefaultRollingPolicy.builder()
@@ -133,21 +205,21 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
 //        finalResult.addSink(actualSink);
 
-        // ok this works as a data iterator, but is it the proper mapping method? Also we need to process the hashmap once
-        //it has finished adding elements to it.
-
         env.execute("Star Detection");
 
     }
 
-    public static class FileTrigger extends Trigger<Tuple2<Long, Integer>, Window> {
+    // does not work as intended
+    public static class OnDayTrigger extends Trigger<AdjacencyList, Window> {
 
+        private int count = 0;
         @Override
-        public TriggerResult onElement(Tuple2<Long, Integer> element, long timestamp, Window window, TriggerContext ctx) throws Exception {
+        public TriggerResult onElement(AdjacencyList element, long timestamp, Window window, TriggerContext ctx) throws Exception {
 
+            count += 1;
             // identifier that splits the input in different files (windows)
-            if(element.f0 == -10000){
-                System.out.println("We found at least 2 files");
+            if(count == 5){
+                System.out.println("Days: " + count);
                 return TriggerResult.FIRE_AND_PURGE;
             }else{
                 return TriggerResult.CONTINUE;
@@ -166,7 +238,7 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
         @Override
         public TriggerResult onProcessingTime(long time, Window window, TriggerContext ctx) throws Exception {
-            return TriggerResult.FIRE_AND_PURGE;
+            return TriggerResult.CONTINUE;
         }
 
         @Override
@@ -180,26 +252,166 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
     }
 
-
-
     public class FlatMapFunctionException extends Exception {
         public FlatMapFunctionException(String errorMessage) {
             super("[Error in FlatMap]:" + errorMessage);
         }
     }
 
+    public static class AdjacencyList {
+        private Long user;
+        private Integer weight;
+        private ArrayList<ArrayList<Long>> edges;
+        // day information here?
 
-    // should this calculate total degree or just outdegree? (right now its only out degree and if it is enough for now)
-    public static class Star implements FlatMapFunction<String, Tuple2<Long, Integer>> {
-
-        public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<Long, ArrayList<Long>>();
-
-//        public Star(HashMap<Long, ArrayList<Long>> rel) {
-//            this.Relations = rel;
-//        }
 
         @Override
-        public void flatMap(String value, Collector<Tuple2<Long, Integer>> out) throws FlatMapFunctionException {
+        public String toString() {
+            return "AdjacencyList{" +
+                    "user=" + this.user +
+                    ", weight=" + this.weight +
+                    ", edgesSize=" + this.edges.size() +
+                    '}';
+        }
+
+        public AdjacencyList(Long user, Integer weight, ArrayList<ArrayList<Long>> edges){
+            this.user = user;
+            this.weight = weight;
+            this.edges = edges;
+        }
+
+        public Long getOutDegree(){
+            Long count = 0L;
+            for(ArrayList<Long> edgeList : edges){
+                count += edgeList.size();
+            }
+
+            return count;
+        }
+
+        public void hardIntersect(ArrayList<Long> ...edges){
+
+            for(ArrayList<Long> edge : edges){
+                this.edges.retainAll(edge);
+            }
+
+        }
+
+        // edges here represent adjacency lists of the same user
+        // ara O(n^3) logika
+        public ArrayList<Tuple2<Long, Tuple2<Long, Long>>> softIntersect(ArrayList<Long> ...edgesLists) {
+
+            HashMap<Long, Long> appearanceOverTime = new HashMap<>();
+            ArrayList<Tuple2<Long, Tuple2<Long, Long>>> consistentStar = new ArrayList<>();
+            AdjacencyList toRet = new AdjacencyList(this.user, this.weight, null);
+            // O(n)
+            for(ArrayList<Long> edgeList : edgesLists) {
+
+                // all the unique adjacent users on a given day.
+                // should probably not be used as a starting point since we want the
+
+                // **C** O(n)
+                Set<Long> uniqueUsersSet = new HashSet<Long>(edgeList);
+//                ArrayList<Long> uniqueUsers = new ArrayList<>();
+//                uniqueUsers.addAll(uniqueUsersSet);
+
+                // **C** O(n-dups)
+                for(Long user : uniqueUsersSet){
+
+                    Long times = appearanceOverTime.get(user);
+                    if(times == null || times == 0L){
+                        appearanceOverTime.put(user, 1L);
+                    }else{
+                        Long newTimes = times + 1;
+                        appearanceOverTime.put(user, newTimes);
+                    }
+                }
+                // do we even care about duplicates in here?
+                // Probably but for some other metric
+//                long duplicates = 0L;
+//
+//                for (Long user : uniqueUsers) {
+//
+//                    int freq = Collections.frequency(edge, user);
+//
+//                    if(freq > 2L){
+//                        duplicates += freq;
+//                    }
+//
+//                }
+            }
+
+            // O(m)
+//            Iterator appear = appearanceOverTime.entrySet().iterator();
+//            while(appear.hasNext()){
+//                Map.Entry mapElement = (Map.Entry)appear.next();
+//                Long user = (Long)mapElement.getKey();
+//                Long days = (Long)mapElement.getValue();
+//                if(days > 20){
+////                    System.out.println("User " + user + " has appeared " + days + " days in user's " + this.user + " star ");
+//                    Tuple2<Long, Tuple2<Long, Long>> perUser = new Tuple2<Long, Tuple2<Long, Long>>(this.user, new Tuple2<>(user, days));
+//                    consistentStar.add(perUser);
+//                    // and return this? maybe add some extra info
+//                }
+//            }
+            appearanceOverTime.forEach((user, days) -> {
+
+                if(days > 20){
+//                    System.out.println("User " + user + " has appeared " + days + " days in user's " + this.user + " star ");
+                    Tuple2<Long, Tuple2<Long, Long>> perUser = new Tuple2<Long, Tuple2<Long, Long>>(this.user, new Tuple2<>(user, days));
+                    consistentStar.add(perUser);
+                    // and return this? maybe add some extra info
+                }
+            });
+
+//            ArrayList<ArrayList<Long>> finalStar = new ArrayList<>();
+//            finalStar.add(consistentStar);
+//
+//            toRet.setEdges(finalStar);
+            return consistentStar;
+
+        }
+
+        public Long getUser() {
+            return user;
+        }
+
+        public void setUser(Long user) {
+            this.user = user;
+        }
+
+        public Integer getWeight() {
+            return this.weight;
+        }
+
+        public void setWeight(Integer weight) {
+            this.weight = weight;
+        }
+
+        public ArrayList<ArrayList<Long>> getEdges() {
+            return this.edges;
+        }
+
+        public void setEdges(ArrayList<ArrayList<Long>> edges) {
+            this.edges = edges;
+        }
+    }
+
+    // should this calculate total degree or just outdegree? (right now its only out degree and if it is enough for now)
+    public static class Star implements FlatMapFunction<String, AdjacencyList> {
+
+        // Probably creating both this way is redundant, should be optimized
+        // Monthly adjacency list
+        public static HashMap<Long, ArrayList<Long>> Relations = new HashMap<Long, ArrayList<Long>>();
+        // should daily adjacency list be here? Probably
+        public static HashMap<Integer, HashMap<Long, ArrayList<Long>>> dailyAdjacencyList = new HashMap<>();
+
+        public static int test = 0;
+
+        // how do we know its the end of a day?
+
+        @Override
+        public void flatMap(String value, Collector<AdjacencyList> out) throws FlatMapFunctionException {
             String[] parts = value.split(",");
             if(parts.length == 1) {
                 // missing edge info
@@ -212,7 +424,7 @@ public class StreamEnv_lessStrictStarDetectionTest {
             // Should handle 3rd part eventually
             Vertex<Long, String> from = new Vertex<>(Long.parseLong(parts[0].trim()), "UserFrom");
             Vertex<Long, String> to = new Vertex<>(Long.parseLong(parts[1].trim()), "UserTo");
-
+            Integer weight = Integer.parseInt(parts[2]);
             // Retweeted should eventually be replaced with the 3rd part value;
 //            graph.addEdge(from, to, "Retweeted");
 
@@ -234,19 +446,24 @@ public class StreamEnv_lessStrictStarDetectionTest {
                     } else {
                         // starting to have "collisions"
                         ArrayList<Long> existingArray = Relations.get(from.f0);
-//                    System.out.println("In flatmap " + existingArray.size());
-                        // sometimes this throws array index out of bounds exception ??? and some times null pointer????
                         existingArray.add(to.f0);
                     }
                 }
 //                System.out.println("Kafka and Flink says: " + value + " " + (Relations.get(from.f0) != null ? Relations.get(from.f0).size() : "-"));
 
             }
-            out.collect(new Tuple2<Long, Integer>(from.f0, 1));
+
+            ArrayList<ArrayList<Long>> edges = new ArrayList<>();
+            ArrayList<Long> edge = new ArrayList<>();
+            edge.add(to.f0);
+            edges.add(edge);
+            AdjacencyList newObject = new AdjacencyList(from.f0, weight, edges);
+            out.collect(newObject);
         }
 
     }
 
+    // this performs the first star persistent search approach
     public static class ExistingStar implements FlatMapFunction<Tuple2<Long, Integer>, Tuple2<Long, Integer>> {
 
 
@@ -318,7 +535,7 @@ public class StreamEnv_lessStrictStarDetectionTest {
 
                 Boolean isPersistent = isPersistent(duplicates, clique.size());
 
-                System.out.println("User " + value.f0 + " duplicates " + duplicates + " persistent " + isPersistent + " size " +  clique.size());
+//                System.out.println("User " + value.f0 + " duplicates " + duplicates + " persistent " + isPersistent + " size " +  clique.size());
                 if(isPersistent){
                     out.collect(new Tuple2<Long, Integer>(value.f0, value.f1));
                 }
