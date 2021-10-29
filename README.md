@@ -4,6 +4,7 @@
 This is a flink based project that utilizes kafka to simulate a real incoming stream of twitter data into flink.
 Data is parsed and processed and then fed into a pipeline of logical subdivisions that flink calls windows. The result of the pipeline
 is the users that contribute the most to the biggest star topologies present in the network graph. This is achieved by calculating the out degree centrality of each user.
+Then the users that have a higher than 1000 out degree pass through a filter and persistent stars can be detected across the period of a month.
 
 ## How to run
 In order for the data to be fed into flink I use a bash script that reads a months worth of data and writes it to the kafka stream.
@@ -21,7 +22,7 @@ Path variables need to be changed to run locally on another machine. I have mark
 A maven assembly plug-in included in this project can produce a jar file by running the `install` command in the maven lifecycle.
 ## Additional Work done
 The project also contains an algorithm that works on static graphs, utilizing the dataset library and simple execution environment, and detects strict star topologies. It is located in
-`starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions. 
+`starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions. Also in the main class of this project there is a flatMap implementation called ExistingStar that performs the static persistent user star search.The parsing script used is also  inclused in the `resources/parseAllToCSV.py` file.
 
 ## Troubleshooting 
 * If you are having issues related to kafka logs you can delete them without breaking anything by running `rm -rf /tmp/kafka-logs`
