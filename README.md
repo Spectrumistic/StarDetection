@@ -14,9 +14,11 @@ Path variables need to be changed to run locally on another machine. I have mark
 1. On another terminal run `bin/kafka-server-start.sh config/server.properties`
 1. Create a topic named quickstart-events by running `bin/kafka-topics.sh --create --topic quickstart-events --bootstrap-server localhost:9092` on another terminal
 1. Step 4 has to be performed only once.
-1. Run the maven project `StreamEnv_lessStrictStarDetectionTest.java`
+1. Run the maven project `StreamEnv_lessStrictStarDetectionTest.java` in InteliJ
 1. On a terminal run the script `resources/startStream.sh`
 
+## How to produce jar
+A maven assembly plug-in included in this project can produce a jar file by running the `install` command in the maven lifecycle.
 ## Additional Work done
 The project also contains an algorithm that works on static graphs, utilizing the dataset library and simple execution environment, and detects strict star topologies. It is located in
 `starDetectionTest.java`. In contrast, the `StreamEnv_lessStrictStarDetectionTest.java` uses a stream environment and utilizes streaming solutions. 
